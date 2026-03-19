@@ -1,0 +1,236 @@
+steam:
+  anonymous: true
+  # username: ""
+  # password: ""
+
+depot:
+  id: 2347770
+  app_id: 730
+
+paths:
+  data: "./data"
+  output: "./output"
+
+download:
+  force: false
+  verify_checksums: false
+  parallel_archives: 4
+
+extract:
+  source2_cli: "./bin/Source2Viewer-CLI"
+  threads: 8
+  parallel: 4
+  vpk_cache: true
+  targets:
+    # ── Images ──
+    - type: images
+      filter: "panorama/images/econ"
+      format: png
+      enabled: true
+    - type: images
+      filter: "panorama/images/backgrounds"
+      format: png
+      enabled: true
+
+    # ── Textures ──
+    - type: textures
+      filter: "materials/models/weapons/customization/paints"
+      format: png
+      enabled: true
+    - type: textures
+      filter: "materials/models/weapons/customization/paints_gloves"
+      format: png
+      enabled: true
+    - type: textures
+      filter: "items/assets"
+      format: png
+      enabled: true
+    - type: textures
+      filter: "weapons"
+      format: png
+      enabled: true
+    - type: textures
+      filter: "materials/default"
+      format: png
+      enabled: true
+    - type: textures
+      filter: "materials/models/weapons/customization/shared"
+      format: png
+      enabled: true
+
+    # ── Materials (vmat) ──
+    - type: materials
+      filter: "materials/models/weapons/customization/paints"
+      format: vmat
+      enabled: true
+
+    # ── Composite materials (vcompmat) ──
+    - type: composites
+      filter: "weapons/paints"
+      format: vcompmat
+      enabled: true
+
+    # ── Sounds ──
+    - type: sounds
+      filter: "sounds/music"
+      format: wav
+      enabled: false
+
+    # ── Models ──
+    - type: models
+      filter: "weapons"
+      format: gltf
+      enabled: false
+      extra_args: ["--gltf_textures_adapt", "--gltf_export_materials", "--gltf_export_extras"]
+    - type: models
+      filter: "materials/models/weapons"
+      format: gltf
+      enabled: false
+      extension: ""
+      extra_args: ["--gltf_textures_adapt", "--gltf_export_materials", "--gltf_export_extras"]
+    - type: models
+      filter: "characters"
+      format: gltf
+      enabled: false
+      extra_args: ["--gltf_textures_adapt", "--gltf_export_materials", "--gltf_export_extras"]
+    - type: models
+      filter: "models/chicken"
+      format: gltf
+      enabled: false
+      extra_args: ["--gltf_textures_adapt", "--gltf_export_materials", "--gltf_export_extras"]
+    - type: models
+      filter: "stickers"
+      format: gltf
+      enabled: false
+      extra_args: ["--gltf_textures_adapt", "--gltf_export_materials", "--gltf_export_extras"]
+
+thumbnails:
+  enabled: true
+  format: webp
+  seek_time: 3
+  sources:
+    - name: highlights
+      url: "https://pricempire.com/api/highlights"
+      languages: ["en", "zh-CN"]
+
+languages:
+  - all
+
+process:
+  group: true
+  cdn_url: "https://cs2-cdn.pricempire.com/"
+
+  # Config-driven item types (no custom code needed)
+  item_types:
+    agents:
+      enabled: true
+      source: items
+      filter:
+        prefab: { equals: "customplayertradable" }
+      fields:
+        id: { template: "agent-{sha:name}" }
+        type: { value: "Agent" }
+        name: { key: "item_name", translate: true }
+        description: { key: "description_string", translate: true }
+        rarity: { key: "item_rarity", prefix: "rarity_" }
+        team: { nested: "used_by_classes", first_key: true }
+        image: { key: "image_inventory", transform: "cdn_image" }
+        model_player: { key: "model_player" }
+
+    patches:
+      enabled: true
+      source: sticker_kits
+      filter:
+        patch_material: { exists: true }
+        exclude:
+          patch_material: ["case_skillgroups/patch_legendaryeagle"]
+      fields:
+        id: { template: "patch-{object_id}" }
+        type: { value: "Patch" }
+        name: { key: "item_name", translate: true }
+        description: { key: "description_string", translate: true }
+        rarity: { key: "item_rarity", prefix: "rarity_" }
+        image: { key: "patch_material", transform: "patch_image" }
+
+    keychains:
+      enabled: true
+      source: keychain_definitions
+      filter:
+        loc_name: { starts_with: "#keychain_" }
+        "is commodity": { not_exists: true }
+      fields:
+        id: { template: "keychain-{object_id}" }
+        type: { value: "Keychain" }
+        name: { key: "loc_name", translate: true }
+        description: { key: "loc_description", translate: true }
+        rarity: { key: "item_rarity", prefix: "rarity_" }
+        image: { key: "image_inventory", transform: "cdn_image" }
+
+    highlights:
+      enabled: true
+      source: highlight_reels
+      fields:
+        id: { template: "highlight-{id}" }
+        type: { value: "Highlight" }
+        name: { key: "loc_name", translate: true }
+        image: { key: "image_inventory", transform: "cdn_image" }
+        video: { key: "video", locale_aware: true }
+
+    tools:
+      enabled: true
+      source: static
+      static_items:
+        - id: "tool-1"
+          name_key: "csgo_tool_name_tag"
+          description_key: "csgo_tool_name_tag_desc"
+          image: "econ/tools/tag"
+        - id: "tool-2"
+          name_key: "csgo_tool_casket_tag"
+          description_key: "csgo_tool_casket_tag_desc"
+          image: "econ/tools/casket"
+        - id: "tool-3"
+          name_key: "csgo_tool_stattrak_swap"
+          description_key: "csgo_tool_stattrak_swap_desc"
+          image: "econ/tools/stattrak_swap_tool"
+        - id: "tool-4"
+          name_key: "csgo_tool_keychain_tool"
+          description_key: "csgo_tool_keychain_tool_desc"
+          image: "econ/tools/keychain_tool"
+
+    base_weapons:
+      enabled: true
+      source: static
+      static_items_file: "data/base-weapons.json"
+
+  # Complex item types (use named transforms)
+  transforms:
+    skins:
+      enabled: true
+      transform: "skins"
+    skins_not_grouped:
+      enabled: true
+      transform: "skinsNotGrouped"
+    stickers:
+      enabled: true
+      transform: "stickers"
+    sticker_slabs:
+      enabled: true
+      transform: "stickerSlabs"
+    crates:
+      enabled: true
+      transform: "crates"
+    collections:
+      enabled: true
+      transform: "collections"
+    graffiti:
+      enabled: true
+      transform: "graffiti"
+    music_kits:
+      enabled: true
+      transform: "musicKits"
+    collectibles:
+      enabled: true
+      transform: "collectibles"
+    keys:
+      enabled: true
+      transform: "keys"
