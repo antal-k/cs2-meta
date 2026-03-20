@@ -5,6 +5,7 @@ import { loadConfig, applyCliOverrides, type Config } from "./config.js";
 import { logger } from "./logger.js";
 import { download, downloadBase, downloadStatic } from "./download/index.js";
 import { extract } from "./extract/index.js";
+import { postprocess, uploadImages } from "./postprocess/index.js";
 import { process as processItems } from "./process/index.js";
 import { runPipeline } from "./pipeline.js";
 
@@ -38,14 +39,18 @@ program
   .command("pipeline")
   .description("Run full pipeline: download -> extract -> process")
   .option("--force", "Force re-download even if up to date")
-  .option("--skip-extract", "Skip extraction step")
-  .option("--skip-process", "Skip processing step")
-  .option("--languages <langs>", "Comma-separated language codes")
-  .action(async (cmdOpts) => {
+    .option("--skip-extract", "Skip extraction step")
+    .option("--skip-postprocess", "Skip image post-processing step")
+    .option("--skip-upload", "Skip CDN upload step")
+    .option("--skip-process", "Skip processing step")
+    .option("--languages <langs>", "Comma-separated language codes")
+    .action(async (cmdOpts) => {
     const config = resolveConfig(program.opts());
     await runPipeline(config, {
       force: cmdOpts.force,
       skipExtract: cmdOpts.skipExtract,
+      skipPostprocess: cmdOpts.skipPostprocess,
+      skipUpload: cmdOpts.skipUpload,
       skipProcess: cmdOpts.skipProcess,
       languages: cmdOpts.languages?.split(","),
     });
@@ -76,6 +81,22 @@ program
   .action(async (cmdOpts) => {
     const config = resolveConfig(program.opts());
     await extract(config, cmdOpts.only);
+  });
+
+program
+  .command("postprocess")
+  .description("Convert extracted PNG images to AVIF and WebP")
+  .action(async () => {
+    const config = resolveConfig(program.opts());
+    await postprocess(config);
+  });
+
+program
+  .command("upload")
+  .description("Upload converted images to CDN (bunny, s3)")
+  .action(async () => {
+    const config = resolveConfig(program.opts());
+    await uploadImages(config);
   });
 
 program

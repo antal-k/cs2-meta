@@ -113,6 +113,48 @@ thumbnails:
       url: "https://pricempire.com/api/highlights"
       languages: ["en", "zh-CN"]
 
+postprocess:
+  images:
+    enabled: true
+    formats: [avif, webp]
+    quality:
+      avif: 50
+      webp: 80
+    sizes:
+      - suffix: xs
+        width: 96
+      - suffix: sm
+        width: 192
+      - suffix: md
+        width: 384
+      - suffix: lg
+        width: 768
+    concurrency: 8
+    skip_existing: true
+
+  # Upload converted images to CDN (optional)
+  upload:
+    enabled: false
+    provider: bunny         # bunny | s3
+    base_path: ""           # path prefix in storage (e.g. "cs2")
+    formats: [avif, webp]
+    include_png: false
+    concurrency: 10
+
+    # ── Bunny CDN ──
+    bunny:
+      storage_zone: ""     # or env BUNNY_STORAGE_ZONE_NAME
+      access_key: ""       # or env BUNNY_ACCESS_KEY
+      region: ""           # or env BUNNY_STORAGE_REGION (e.g. "ny", "la", "sg")
+
+    # ── S3 / S3-compatible (R2, MinIO, DigitalOcean Spaces, etc.) ──
+    # s3:
+    #   bucket: ""
+    #   region: "us-east-1"
+    #   access_key_id: ""    # or env AWS_ACCESS_KEY_ID
+    #   secret_access_key: "" # or env AWS_SECRET_ACCESS_KEY
+    #   endpoint: ""         # custom endpoint for S3-compatible (e.g. R2, MinIO)
+
 languages:
   - all
 

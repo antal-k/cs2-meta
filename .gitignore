@@ -4,6 +4,7 @@ data/
 output/
 bin/
 config.yaml
+.env
 *.log
 .DS_Store
 exceptions.txt

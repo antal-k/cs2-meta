@@ -1,3 +1,4 @@
+import "dotenv/config";
 import fs from "fs";
 import path from "path";
 import { parse as parseYaml } from "yaml";
@@ -50,6 +51,53 @@ export interface TransformDef {
   transform: string;
 }
 
+export interface ImageSizeDef {
+  suffix: string;
+  width: number;
+}
+
+export interface PostprocessImagesConfig {
+  enabled: boolean;
+  formats: ("avif" | "webp")[];
+  quality: {
+    avif: number;
+    webp: number;
+  };
+  sizes: ImageSizeDef[];
+  concurrency: number;
+  skip_existing: boolean;
+}
+
+export interface BunnyConfig {
+  storage_zone: string;
+  access_key: string;
+  region: string;
+}
+
+export interface S3Config {
+  bucket: string;
+  region: string;
+  access_key_id: string;
+  secret_access_key: string;
+  endpoint: string;
+}
+
+export interface UploadConfig {
+  enabled: boolean;
+  provider: string;
+  base_path: string;
+  formats: string[];
+  include_png: boolean;
+  concurrency: number;
+  bunny?: BunnyConfig;
+  s3?: S3Config;
+}
+
+export interface PostprocessConfig {
+  images: PostprocessImagesConfig;
+  upload?: UploadConfig;
+}
+
 export interface Config {
   steam: {
     anonymous: boolean;
@@ -82,6 +130,7 @@ export interface Config {
     seek_time: number;
     sources: ThumbnailSource[];
   };
+  postprocess?: PostprocessConfig;
   languages: string[];
   process: {
     group: boolean;
@@ -131,6 +180,21 @@ const DEFAULT_CONFIG: Config = {
     sources: [
       { name: "highlights", url: "https://pricempire.com/api/highlights", languages: ["en", "zh-CN"] },
     ],
+  },
+  postprocess: {
+    images: {
+      enabled: true,
+      formats: ["avif", "webp"],
+      quality: { avif: 50, webp: 80 },
+      sizes: [
+        { suffix: "xs", width: 96 },
+        { suffix: "sm", width: 192 },
+        { suffix: "md", width: 384 },
+        { suffix: "lg", width: 768 },
+      ],
+      concurrency: 8,
+      skip_existing: true,
+    },
   },
   languages: ["all"],
   process: {
@@ -270,6 +334,28 @@ export function loadConfig(configPath?: string): Config {
   }
   if (process.env.FORCE_DOWNLOAD === "true") {
     envOverrides.download = { force: true };
+  }
+  const uploadEnv: Record<string, unknown> = {};
+  if (process.env.BUNNY_ACCESS_KEY) {
+    const bunny: Record<string, unknown> = {
+      access_key: process.env.BUNNY_ACCESS_KEY,
+    };
+    if (process.env.BUNNY_STORAGE_ZONE_NAME) bunny.storage_zone = process.env.BUNNY_STORAGE_ZONE_NAME;
+    if (process.env.BUNNY_STORAGE_REGION) bunny.region = process.env.BUNNY_STORAGE_REGION;
+    uploadEnv.bunny = bunny;
+  }
+  if (process.env.AWS_ACCESS_KEY_ID) {
+    const s3: Record<string, unknown> = {
+      access_key_id: process.env.AWS_ACCESS_KEY_ID,
+    };
+    if (process.env.AWS_SECRET_ACCESS_KEY) s3.secret_access_key = process.env.AWS_SECRET_ACCESS_KEY;
+    if (process.env.AWS_REGION) s3.region = process.env.AWS_REGION;
+    if (process.env.S3_BUCKET) s3.bucket = process.env.S3_BUCKET;
+    if (process.env.S3_ENDPOINT) s3.endpoint = process.env.S3_ENDPOINT;
+    uploadEnv.s3 = s3;
+  }
+  if (Object.keys(uploadEnv).length > 0) {
+    envOverrides.postprocess = { upload: uploadEnv };
   }
 
   const merged = deepMerge(

@@ -5,6 +5,7 @@ import type { Config } from "./config.js";
 import { download } from "./download/index.js";
 import { extract } from "./extract/index.js";
 import { extractThumbnails } from "./extract/thumbnails.js";
+import { convertImages, uploadImages } from "./postprocess/index.js";
 import { process as processItems } from "./process/index.js";
 
 const LOCK_FILE = ".cs2-meta.lock";
@@ -35,6 +36,8 @@ function releaseLock(config: Config): void {
 export interface PipelineOptions {
   force?: boolean;
   skipExtract?: boolean;
+  skipPostprocess?: boolean;
+  skipUpload?: boolean;
   skipProcess?: boolean;
   languages?: string[];
 }
@@ -57,7 +60,17 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
       await extract(config);
     }
 
-    // Step 3: Process
+    // Step 3: Post-process (PNG → AVIF/WebP + resize)
+    if (!opts.skipPostprocess) {
+      await convertImages(config);
+    }
+
+    // Step 4: Upload to CDN
+    if (!opts.skipUpload) {
+      await uploadImages(config);
+    }
+
+    // Step 5: Process
     if (!opts.skipProcess) {
       await processItems(config, opts.languages);
     }
