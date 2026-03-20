@@ -46,7 +46,7 @@ A pipeline tool that downloads, extracts, and processes Counter-Strike 2 game fi
 ```bash
 npm install
 
-# Run the full pipeline (download → extract → postprocess → upload → process)
+# Run the full pipeline (download → extract → process → postprocess → upload)
 npm run pipeline
 
 # Or run stages individually
@@ -271,7 +271,7 @@ cs2-meta/
 ├── src/
 │   ├── index.ts                CLI entry point
 │   ├── config.ts               YAML config loading + CLI overrides
-│   ├── pipeline.ts             Orchestrates download → extract → postprocess → upload → process
+│   ├── pipeline.ts             Orchestrates download → extract → process → postprocess → upload
 │   ├── logger.ts               Chalk + Ora colored output
 │   ├── download/
 │   │   ├── steam.ts            Steam client, anonymous login, manifest

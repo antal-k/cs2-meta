@@ -37,7 +37,7 @@ function resolveConfig(opts: Record<string, any>): Config {
 
 program
   .command("pipeline")
-  .description("Run full pipeline: download -> extract -> process")
+  .description("Run full pipeline: download -> extract -> process -> postprocess -> upload")
   .option("--force", "Force re-download even if up to date")
     .option("--skip-extract", "Skip extraction step")
     .option("--skip-postprocess", "Skip image post-processing step")

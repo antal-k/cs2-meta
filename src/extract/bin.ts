@@ -127,11 +127,11 @@ export async function ensureBinary(config: Config): Promise<string> {
   fs.mkdirSync(binDir, { recursive: true });
   const zipPath = path.join(binDir, assetName);
 
-  const spin = logger.spin(`Downloading ${asset.name}...`);
+  const dlSpinner = logger.spin(`Downloading ${asset.name}...`);
   await downloadFile(asset.browser_download_url, zipPath);
-  logger.stopSpin(`Downloaded ${asset.name}`);
+  dlSpinner.succeed(`Downloaded ${asset.name}`);
 
-  logger.info("Extracting archive...");
+  const extractSpinner = logger.spin("Extracting archive...");
   if (os.platform() === "win32") {
     execSync(`powershell -Command "Expand-Archive -Force '${zipPath}' '${binDir}'"`, { stdio: "pipe" });
   } else {
@@ -145,7 +145,7 @@ export async function ensureBinary(config: Config): Promise<string> {
   }
 
   saveInstalledVersion(binDir, tag);
-  logger.success(`Source2Viewer-CLI ${tag} installed to ${binDir}`);
+  extractSpinner.succeed(`Source2Viewer-CLI ${tag} installed`);
 
   return cliPath;
 }

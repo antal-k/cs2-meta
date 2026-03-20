@@ -18,6 +18,12 @@ interface Source2Options {
   extraArgs?: string[];
 }
 
+interface ExtractResult {
+  target: ExtractTarget;
+  status: "ok" | "partial" | "failed";
+  error?: string;
+}
+
 function buildArgs(opts: Source2Options): string[] {
   const args = ["-i", opts.input, "-o", opts.output];
   if (opts.decompile) args.push("-d");
@@ -48,12 +54,16 @@ function getExtension(target: ExtractTarget): string | undefined {
   }
 }
 
-export async function extractTarget(
+function targetLabel(target: ExtractTarget): string {
+  return `${target.type}: ${target.filter}`;
+}
+
+async function runTarget(
   config: Config,
   target: ExtractTarget,
   vpkFile: string,
-  outputDir: string
-): Promise<void> {
+  outputDir: string,
+): Promise<ExtractResult> {
   const cliPath = await ensureBinary(config);
   const ext = getExtension(target);
 
@@ -69,7 +79,6 @@ export async function extractTarget(
   };
 
   const args = buildArgs(opts);
-  logger.info(`Extracting ${target.type}: ${target.filter} (${ext ?? "all"})`);
   logger.debug(`${cliPath} ${args.join(" ")}`);
 
   try {
@@ -78,35 +87,29 @@ export async function extractTarget(
       timeout: 600_000,
     });
     if (stdout) logger.debug(stdout.slice(0, 500));
-    if (stderr) logger.warn(stderr.slice(0, 500));
-    logger.success(`Extracted ${target.type}`);
+    if (stderr) logger.debug(stderr.slice(0, 500));
+    return { target, status: "ok" };
   } catch (err: any) {
     if (err.stdout || err.stderr) {
-      logger.warn(`Extraction for ${target.type} (${target.filter}) exited with error but may have partially succeeded`);
-      if (err.stderr) logger.warn(err.stderr.slice(0, 300));
-    } else {
-      logger.error(`Extraction failed for ${target.type}:`, (err as Error).message);
-      throw err;
+      if (err.stderr) logger.debug(err.stderr.slice(0, 300));
+      return { target, status: "partial" };
     }
+    return { target, status: "failed", error: (err as Error).message };
   }
 }
 
-async function runPool<T>(
+async function runPool<T, R>(
   items: T[],
   concurrency: number,
-  fn: (item: T) => Promise<void>,
-): Promise<void> {
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
   let index = 0;
-  const errors: Error[] = [];
 
   async function worker() {
     while (index < items.length) {
       const i = index++;
-      try {
-        await fn(items[i]);
-      } catch (err) {
-        errors.push(err as Error);
-      }
+      results[i] = await fn(items[i]);
     }
   }
 
@@ -115,11 +118,7 @@ async function runPool<T>(
     () => worker(),
   );
   await Promise.all(workers);
-
-  if (errors.length > 0) {
-    logger.error(`${errors.length} extraction(s) failed`);
-    throw errors[0];
-  }
+  return results;
 }
 
 export async function extractAll(config: Config): Promise<void> {
@@ -134,30 +133,99 @@ export async function extractAll(config: Config): Promise<void> {
     return;
   }
 
+  const total = enabledTargets.length;
   const concurrency = config.extract.parallel ?? 1;
   logger.info(
-    `${enabledTargets.length} targets, concurrency ${concurrency} (threads/target: ${config.extract.threads})`,
+    `${total} targets, concurrency ${concurrency} (threads/target: ${config.extract.threads})`,
   );
 
+  const start = Date.now();
+  let done = 0;
+
+  const spinner = logger.spin(`Extracting [0/${total}]...`);
+  const updateSpinner = () => {
+    spinner.text = `Extracting [${done}/${total}]...`;
+  };
+
+  let results: ExtractResult[];
+
   if (concurrency <= 1) {
+    results = [];
     for (const target of enabledTargets) {
-      await extractTarget(config, target, vpkFile, outputDir);
+      spinner.text = `Extracting [${done + 1}/${total}] ${targetLabel(target)}...`;
+      const result = await runTarget(config, target, vpkFile, outputDir);
+      results.push(result);
+      done++;
+      updateSpinner();
     }
   } else {
-    await runPool(enabledTargets, concurrency, (target) =>
-      extractTarget(config, target, vpkFile, outputDir),
-    );
+    results = await runPool(enabledTargets, concurrency, async (target) => {
+      const result = await runTarget(config, target, vpkFile, outputDir);
+      done++;
+      updateSpinner();
+      return result;
+    });
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  const ok = results.filter((r) => r.status === "ok").length;
+  const partial = results.filter((r) => r.status === "partial").length;
+  const failed = results.filter((r) => r.status === "failed").length;
+
+  if (failed > 0) {
+    spinner.warn(`Extraction: ${ok} ok, ${partial} partial, ${failed} failed (${elapsed}s)`);
+  } else if (partial > 0) {
+    spinner.warn(`Extraction: ${ok} ok, ${partial} partial (${elapsed}s)`);
+  } else {
+    spinner.succeed(`Extraction complete: ${total} targets in ${elapsed}s`);
+  }
+
+  for (const r of results) {
+    const label = targetLabel(r.target);
+    if (r.status === "ok") {
+      logger.success(label);
+    } else if (r.status === "partial") {
+      logger.warn(`${label} (partial)`);
+    } else {
+      logger.error(`${label} — ${r.error}`);
+    }
+  }
+
+  if (failed > 0) {
+    throw new Error(`${failed} extraction(s) failed`);
   }
 }
 
 export async function extractOnly(config: Config, targetType: string): Promise<void> {
-  const target = config.extract.targets.find((t) => t.type === targetType);
-  if (!target) {
+  const targets = config.extract.targets.filter((t) => t.type === targetType);
+  if (targets.length === 0) {
     logger.error(`Unknown extract target: ${targetType}`);
     return;
   }
 
+  logger.step(`Extract: ${targetType}`);
+
   const vpkFile = path.resolve(config.paths.data, "vpk", "pak01_dir.vpk");
   const outputDir = path.resolve(config.paths.output);
-  await extractTarget(config, { ...target, enabled: true }, vpkFile, outputDir);
+
+  const start = Date.now();
+  const total = targets.length;
+
+  const spinner = logger.spin(`Extracting [0/${total}]...`);
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+    spinner.text = `Extracting [${i + 1}/${total}] ${targetLabel(target)}...`;
+    const result = await runTarget(config, { ...target, enabled: true }, vpkFile, outputDir);
+
+    if (result.status === "failed") {
+      spinner.fail(`${targetLabel(target)} — ${result.error}`);
+      throw new Error(`Extraction failed for ${targetType}`);
+    }
+  }
+
+  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+  spinner.succeed(`Extraction complete: ${total} target(s) in ${elapsed}s`);
 }
+
+export { runTarget as extractTarget };

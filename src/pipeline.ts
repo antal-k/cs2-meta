@@ -60,19 +60,19 @@ export async function runPipeline(config: Config, opts: PipelineOptions = {}): P
       await extract(config);
     }
 
-    // Step 3: Post-process (PNG → AVIF/WebP + resize)
+    // Step 3: Process (generate JSON)
+    if (!opts.skipProcess) {
+      await processItems(config, opts.languages);
+    }
+
+    // Step 4: Post-process (PNG → AVIF/WebP + resize)
     if (!opts.skipPostprocess) {
       await convertImages(config);
     }
 
-    // Step 4: Upload to CDN
+    // Step 5: Upload to CDN
     if (!opts.skipUpload) {
       await uploadImages(config);
-    }
-
-    // Step 5: Process
-    if (!opts.skipProcess) {
-      await processItems(config, opts.languages);
     }
 
     const elapsed = ((Date.now() - start) / 1000).toFixed(1);

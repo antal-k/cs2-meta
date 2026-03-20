@@ -4,19 +4,23 @@ import sharp from "sharp";
 import { logger } from "../logger.js";
 import type { Config, ImageSizeDef } from "../config.js";
 
+interface OutputSpec {
+  dest: string;
+  format: "avif" | "webp";
+  quality: number;
+  width?: number;
+}
+
+interface FileTask {
+  src: string;
+  outputs: OutputSpec[];
+}
+
 interface ConvertStats {
   total: number;
   converted: number;
   skipped: number;
   failed: number;
-}
-
-interface ConvertJob {
-  src: string;
-  dest: string;
-  format: "avif" | "webp";
-  quality: number;
-  width?: number;
 }
 
 async function findPngs(dir: string): Promise<string[]> {
@@ -38,9 +42,7 @@ async function findPngs(dir: string): Promise<string[]> {
 function needsConversion(src: string, dest: string, skipExisting: boolean): boolean {
   if (!skipExisting) return true;
   if (!fs.existsSync(dest)) return true;
-  const srcStat = fs.statSync(src);
-  const destStat = fs.statSync(dest);
-  return srcStat.mtimeMs > destStat.mtimeMs;
+  return fs.statSync(src).mtimeMs > fs.statSync(dest).mtimeMs;
 }
 
 function buildDest(src: string, format: string, sizeSuffix?: string): string {
@@ -51,26 +53,109 @@ function buildDest(src: string, format: string, sizeSuffix?: string): string {
   return src.replace(/\.png$/, ext);
 }
 
-async function runJob(job: ConvertJob): Promise<"converted" | "skipped" | "failed"> {
-  try {
-    let pipeline = sharp(job.src);
+function encode(pipeline: sharp.Sharp, format: "avif" | "webp", quality: number): sharp.Sharp {
+  return format === "avif"
+    ? pipeline.avif({ quality, effort: 4 })
+    : pipeline.webp({ quality, effort: 4 });
+}
 
-    if (job.width) {
-      const meta = await pipeline.metadata();
-      if (meta.width && meta.width > job.width) {
-        pipeline = pipeline.resize({ width: job.width, withoutEnlargement: true });
+async function processFile(task: FileTask): Promise<{ converted: number; failed: number }> {
+  let converted = 0;
+  let failed = 0;
+
+  const buf = fs.readFileSync(task.src);
+  const meta = await sharp(buf).metadata();
+  const srcWidth = meta.width ?? Infinity;
+
+  const fullOutputs = task.outputs.filter((o) => !o.width);
+  const sizedOutputs = task.outputs
+    .filter((o) => o.width)
+    .sort((a, b) => (b.width ?? 0) - (a.width ?? 0));
+
+  for (const out of fullOutputs) {
+    try {
+      await encode(sharp(buf), out.format, out.quality).toFile(out.dest);
+      converted++;
+    } catch {
+      failed++;
+    }
+  }
+
+  let currentBuf = buf;
+  let currentWidth = srcWidth;
+
+  for (const out of sizedOutputs) {
+    if (out.width! >= currentWidth) {
+      try {
+        await encode(sharp(currentBuf), out.format, out.quality).toFile(out.dest);
+        converted++;
+      } catch {
+        failed++;
+      }
+      continue;
+    }
+
+    try {
+      const resized = await sharp(currentBuf)
+        .resize({ width: out.width, withoutEnlargement: true })
+        .png()
+        .toBuffer() as Buffer<ArrayBuffer>;
+
+      currentBuf = resized;
+      currentWidth = out.width!;
+
+      await encode(sharp(resized), out.format, out.quality).toFile(out.dest);
+      converted++;
+    } catch {
+      failed++;
+    }
+  }
+
+  return { converted, failed };
+}
+
+function buildTasks(
+  pngs: string[],
+  formats: ("avif" | "webp")[],
+  quality: Record<string, number>,
+  sizes: ImageSizeDef[],
+  skipExisting: boolean,
+): { tasks: FileTask[]; totalOutputs: number; skippedOutputs: number } {
+  const tasks: FileTask[] = [];
+  let totalOutputs = 0;
+  let skippedOutputs = 0;
+
+  for (const src of pngs) {
+    const outputs: OutputSpec[] = [];
+
+    for (const format of formats) {
+      const q = quality[format];
+
+      const fullDest = buildDest(src, format);
+      totalOutputs++;
+      if (needsConversion(src, fullDest, skipExisting)) {
+        outputs.push({ dest: fullDest, format, quality: q });
+      } else {
+        skippedOutputs++;
+      }
+
+      for (const size of sizes) {
+        const dest = buildDest(src, format, size.suffix);
+        totalOutputs++;
+        if (needsConversion(src, dest, skipExisting)) {
+          outputs.push({ dest, format, quality: q, width: size.width });
+        } else {
+          skippedOutputs++;
+        }
       }
     }
 
-    if (job.format === "avif") {
-      await pipeline.avif({ quality: job.quality, effort: 4 }).toFile(job.dest);
-    } else {
-      await pipeline.webp({ quality: job.quality, effort: 4 }).toFile(job.dest);
+    if (outputs.length > 0) {
+      tasks.push({ src, outputs });
     }
-    return "converted";
-  } catch {
-    return "failed";
   }
+
+  return { tasks, totalOutputs, skippedOutputs };
 }
 
 async function processInBatches<T, R>(
@@ -81,40 +166,9 @@ async function processInBatches<T, R>(
   const results: R[] = [];
   for (let i = 0; i < items.length; i += concurrency) {
     const batch = items.slice(i, i + concurrency);
-    const batchResults = await Promise.all(batch.map(fn));
-    results.push(...batchResults);
+    results.push(...(await Promise.all(batch.map(fn))));
   }
   return results;
-}
-
-function buildJobs(
-  pngs: string[],
-  formats: ("avif" | "webp")[],
-  quality: Record<string, number>,
-  sizes: ImageSizeDef[],
-  skipExisting: boolean,
-): ConvertJob[] {
-  const jobs: ConvertJob[] = [];
-
-  for (const src of pngs) {
-    for (const format of formats) {
-      const q = quality[format];
-
-      const fullDest = buildDest(src, format);
-      if (needsConversion(src, fullDest, skipExisting)) {
-        jobs.push({ src, dest: fullDest, format, quality: q });
-      }
-
-      for (const size of sizes) {
-        const dest = buildDest(src, format, size.suffix);
-        if (needsConversion(src, dest, skipExisting)) {
-          jobs.push({ src, dest, format, quality: q, width: size.width });
-        }
-      }
-    }
-  }
-
-  return jobs;
 }
 
 export async function convertImages(config: Config): Promise<void> {
@@ -138,35 +192,32 @@ export async function convertImages(config: Config): Promise<void> {
 
   if (pngs.length === 0) return;
 
-  const jobs = buildJobs(pngs, formats, quality, sizes, skip_existing);
-  const skippedCount = pngs.length * formats.length * (1 + sizes.length) - jobs.length;
+  const { tasks, totalOutputs, skippedOutputs } = buildTasks(pngs, formats, quality, sizes, skip_existing);
+  const pendingOutputs = totalOutputs - skippedOutputs;
 
-  if (jobs.length === 0) {
-    logger.success(`All ${skippedCount} outputs already up-to-date`);
+  if (tasks.length === 0) {
+    logger.success(`All ${skippedOutputs} outputs already up-to-date`);
     return;
   }
 
-  logger.info(`${jobs.length} conversions to run (${skippedCount} already up-to-date)`);
+  logger.info(`${tasks.length} files to process (${pendingOutputs} outputs, ${skippedOutputs} cached)`);
 
-  const stats: ConvertStats = { total: jobs.length, converted: 0, skipped: 0, failed: 0 };
-  const jobSpinner = logger.spin(`Processing 0/${jobs.length}...`);
+  const stats: ConvertStats = { total: pendingOutputs, converted: 0, skipped: 0, failed: 0 };
+  const jobSpinner = logger.spin(`Processing 0/${tasks.length} files...`);
 
   let done = 0;
-  const results = await processInBatches(jobs, concurrency, async (job) => {
-    const result = await runJob(job);
+  await processInBatches(tasks, concurrency, async (task) => {
+    const result = await processFile(task);
+    stats.converted += result.converted;
+    stats.failed += result.failed;
     done++;
-    if (done % 50 === 0 || done === jobs.length) {
-      jobSpinner.text = `Processing ${done}/${jobs.length}...`;
+    if (done % 10 === 0 || done === tasks.length) {
+      jobSpinner.text = `Processing ${done}/${tasks.length} files...`;
     }
-    return result;
   });
 
-  for (const r of results) {
-    stats[r]++;
-  }
-
   jobSpinner.succeed(
-    `Done: ${stats.converted} converted, ${stats.failed} failed (${skippedCount} cached)`,
+    `Done: ${stats.converted} converted, ${stats.failed} failed (${skippedOutputs} cached)`,
   );
 
   if (stats.failed > 0) {

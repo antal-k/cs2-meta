@@ -12,7 +12,7 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
 };
 
 let currentLevel: LogLevel = "info";
-let spinner: Ora | null = null;
+let activeSpinner: Ora | null = null;
 
 function shouldLog(level: LogLevel): boolean {
   return LEVEL_ORDER[level] >= LEVEL_ORDER[currentLevel];
@@ -22,6 +22,16 @@ function timestamp(): string {
   return chalk.dim(`[${new Date().toISOString()}]`);
 }
 
+function logWithSpinnerGuard(fn: () => void): void {
+  if (activeSpinner?.isSpinning) {
+    activeSpinner.stop();
+    fn();
+    activeSpinner.start();
+  } else {
+    fn();
+  }
+}
+
 export const logger = {
   setLevel(level: LogLevel) {
     currentLevel = level;
@@ -29,58 +39,56 @@ export const logger = {
 
   debug(...args: unknown[]) {
     if (shouldLog("debug")) {
-      console.log(timestamp(), chalk.gray("DBG"), ...args);
+      logWithSpinnerGuard(() => console.log(timestamp(), chalk.gray("DBG"), ...args));
     }
   },
 
   info(...args: unknown[]) {
     if (shouldLog("info")) {
-      console.log(timestamp(), chalk.blue("INF"), ...args);
+      logWithSpinnerGuard(() => console.log(timestamp(), chalk.blue("INF"), ...args));
     }
   },
 
   success(...args: unknown[]) {
     if (shouldLog("info")) {
-      console.log(timestamp(), chalk.green("OK "), ...args);
+      logWithSpinnerGuard(() => console.log(timestamp(), chalk.green("OK "), ...args));
     }
   },
 
   warn(...args: unknown[]) {
     if (shouldLog("warn")) {
-      console.warn(timestamp(), chalk.yellow("WRN"), ...args);
+      logWithSpinnerGuard(() => console.warn(timestamp(), chalk.yellow("WRN"), ...args));
     }
   },
 
   error(...args: unknown[]) {
     if (shouldLog("error")) {
-      console.error(timestamp(), chalk.red("ERR"), ...args);
+      logWithSpinnerGuard(() => console.error(timestamp(), chalk.red("ERR"), ...args));
     }
   },
 
   step(message: string) {
     if (shouldLog("info")) {
-      console.log(
-        timestamp(),
-        chalk.cyan(">>>"),
-        chalk.bold(message)
+      logWithSpinnerGuard(() =>
+        console.log(timestamp(), chalk.cyan(">>>"), chalk.bold(message)),
       );
     }
   },
 
   spin(message: string): Ora {
-    if (spinner) spinner.stop();
-    spinner = ora({ text: message, prefixText: timestamp() }).start();
-    return spinner;
+    if (activeSpinner) activeSpinner.stop();
+    activeSpinner = ora({ text: message, prefixText: timestamp() }).start();
+    return activeSpinner;
   },
 
   stopSpin(message?: string, success = true) {
-    if (spinner) {
+    if (activeSpinner) {
       if (success) {
-        spinner.succeed(message);
+        activeSpinner.succeed(message);
       } else {
-        spinner.fail(message);
+        activeSpinner.fail(message);
       }
-      spinner = null;
+      activeSpinner = null;
     }
   },
 };
