@@ -9,7 +9,7 @@ export function saveTypeJson(
   typeName: string,
   data: any[]
 ): void {
-  const outDir = path.resolve(config.paths.output, "api", langFolder);
+  const outDir = path.resolve(config.paths.output, langFolder);
   fs.mkdirSync(outDir, { recursive: true });
   const filePath = path.join(outDir, `${typeName}.json`);
   fs.writeFileSync(filePath, JSON.stringify(data, null, 1));
@@ -17,7 +17,7 @@ export function saveTypeJson(
 }
 
 export function groupAll(config: Config, langFolder: string, typeNames: string[]): void {
-  const outDir = path.resolve(config.paths.output, "api", langFolder);
+  const outDir = path.resolve(config.paths.output, langFolder);
   const allData: Record<string, any> = {};
 
   for (const typeName of typeNames) {
